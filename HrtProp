@@ -1,0 +1,190 @@
+% Programme to calculate from given Hartmanngram the wavefront, assuming
+% that the unknown reference wave front is given by the best fit of of the spots.
+% Then use BPM - beam propagation method (3D), based on K. Okamoto Ch 7
+% all units are microns
+% Masoud M., Mabel R.L., Barbara K., Erez R., 2020-2023 
+
+close all; clearvars
+mm = 1e3; um = 1; nm = 1e-3; % units 
+%% 1. Parameters
+l     =   45 * mm; % distance Hartmann-camera
+pixel = 13.5 * um; % camera pixelsize
+pitch =  150 * um; % Hartmann holes pitch
+wl    = 13.5 * nm; % wave length
+thrsh = 0.05; % noise threshold
+thr   = 0.05; % % mask threshold
+limit = 0;    % noise after smoothing
+cl = pitch / (2*pi*l); % calibrate angles to distances: one pitch angle is 1 cycle, or 2pi
+
+%% 2. Read the file
+[filename, dirPath]  = uigetfile ({'*.SPE;*.txt'}, 'Select a file', 'C:\Users\ruizlope\Desktop\schwarzschild\VIS Schwarzchild 0323\VIS Schwarzchild 0323'); % choose and read file
+disp (filename); ft = char(split(filename, '.')); ft = ft (2, 1:3); % extension type
+if ft == 'SPE', hf = double (readSPE (dirPath, filename)); % for SPE files
+elseif ft == 'txt', hf = importdata([dirPath filename]); end % for text files
+if isstruct(hf), hf = hf.data; end
+hr = double (readSPE ('7min_2um_0dgr2.SPE'));  % built-in reference file
+
+
+%% 3. Magnification reference file
+%If the measured file is magnified respect to the original due to the optics, here the magnification is calculated.
+
+[Ny, Nx] = size (hf); N21 = Nx/2+1;  % array side; Matlab array centre
+hr = padarray (imresize (hr, 0.5), [Ny/4 Nx/4], 'both');% Reference file with half size and padded; B = padarray(A,padsize,padval) pads array A where padval specifies a constant value to use for padded elements or a method to replicate array elements.
+hg = imresize (hr, 0.5); hr = zeros (Ny, Nx); hr (1:Ny/2, 1:Nx/2) = hg; hr = circshift (hr, [Ny/4, Nx/4]);% Image too big, shrink it to avoid aliasing:
+HR = fftshift (fft2 (hr)); % transform, recentre Fourier
+hprofile=abs(HR(N21, :)); vprofile=abs(HR(:, N21)); % Profile of the fourier transformation for the horizonal and veritcal center lines
+[hpeaks, hpos]=findpeaks(hprofile, 'MinPeakDistance',Nx/40, 'MinPeakHeight',max(hprofile)/11); % hPos is position of the peaks
+[vpeaks, vpos]=findpeaks(vprofile, 'MinPeakDistance',Ny/40, 'MinPeakHeight',max(vprofile)/11); % vPos is position of the peaks
+qx = N21-hpos(ceil(length(hpeaks)/2)-1); qy = N21-vpos(ceil(length(vpeaks)/2)-1); % Distances between the central peak and the first lobes
+qr = mean (qx, qy);  qq = round (qr);
+
+%% 4. Calculating intensity
+
+hf = hf /(max(max(hf))); % Normalise max to 1
+hf (hf < thrsh) = 0; % Removing negative noise
+% hg = imresize (hf, 0.5); hf = zeros (Ny, Nx); hf (1:Ny/2, 1:Nx/2) = hg; hf = circshift (hf, [Ny/4, Nx/4]); % shrink image to avoid aliasing
+hf = padarray (imresize (hf, 0.5), [Ny/4 Nx/4], 'both');
+fig = uifigure; fig.Position = [1396 105 480 170];  % create centred smaller mask
+figure (1); set (1, 'pos', [20 75 1359 1023]); imagesc (hf); axis image; colormap("jet"); colorbar
+h = drawellipse ('Center',[N21, N21],'SemiAxes',.5*[N21, N21], 'StripeColor','r'); % fit ellipse to data
+uialert(fig,'Reshape, rotate, click here', 'Program Information','Icon','info','CloseFcn','uiresume(fig)'); uiwait(fig); %circshift is to  move the mask to the center of the figure
+hc = round (h.Center); cr = circshift (createMask(h), hc - [N21, N21]); close (fig);  % ellipse containg data
+ring_mask=cr; %-cr_inte;
+hf = circshift (hf, hc - [N21, N21]); figure (1); clf; imagesc (hf); axis image; colorbar; % centred data % the figure is also shifted
+
+HF = fftshift (fft2 (hf)); % transform, recentre Fourier
+hprofile=abs(HF(N21, :)); vprofile=abs(HF(:, N21)); % Profile of the fourier transformation for the horizonal and vertical center lines
+[hpeaks, hpos]=findpeaks(hprofile, 'MinPeakDistance',Nx/40, 'MinPeakHeight',max(hprofile)/11); % hPos is position of the peaks
+[vpeaks, vpos]=findpeaks(vprofile, 'MinPeakDistance',Ny/40, 'MinPeakHeight',max(vprofile)/11); % vPos is position of the peaks
+qx = N21-hpos(ceil(length(hpeaks)/2)-1); qy = N21-vpos(ceil(length(vpeaks)/2)-1); % Distances between the central peak and the first lobes
+qz = mean (qx, qy); qq = round (qz);
+qbx=mean(diff(hpos)); qby=mean(diff(vpos)); Q1= [qbx, qby];  qbq = mean(Q1);
+ref_q = 2*(Nx/(pitch/pixel)); % mean magnification for the ideal planar wavefront 
+mag_d= qbq/ref_q; focdis = l*1e-6 / (1/mag_d - 1); dis_Hart_source = sprintf('%.5f m', focdis)
+
+
+%% 4.2. Creating a mask
+
+ptch = round (pitch / pixel / 2 * 2.5) ; % array shrinking leads to twice smaller pitch
+m = imclose(hf>thr, strel('disk', ptch+1));m = imopen (m, strel('disk', ptch-1)); % define mask in HS aperture foci
+m = m .* cr; % if threshold too low, this hand-fitted ellipse will remove outside patterns
+m = m .* cr; % if threshold too low, this hand-fitted ellipse will remove outside patterns
+n = 1 - m; sm = sum (m (:)); sn = sum (n (:)); %em = edge (m); % mask and anti-mask, edge pixels of mask
+
+CB = CosBell (Nx, Ny, qq/8, qq/9); % circular mask, centred 
+CO = fftshift (CosBell (Nx, Ny, 3.5, 1.5)); % same, but centred on origin for Fourier plane
+
+
+%% 4.3. Filtering the central lobe to calculate the slopes
+
+HFC  = HF .* CB; % low pass filter
+hfc = ifft2 (fftshift(HFC)); % transform back
+hfc(hfc<limit) = 0; % removing noise in the retrieved intensity
+figure (21); set (gcf, 'pos', [5 497 976 498])
+subplot (221); imagesc (hf);      axis image; colorbar; title ('input, embeded'); caxis ([0 0.2])
+subplot (222); imagesc (hfc);     axis image; colorbar; title ('smoothed intensity');
+subplot (223); imagesc (m);       axis image; colorbar; title ('H-S foci mask');
+subplot (224); imagesc (abs(HF)); axis image; colorbar; title ('H-S transform'); caxis ([0 100])
+drawnow
+
+%% 5. Side lobes and slopes 
+cl = pitch / (2*pi*(l+focdis)); % calibrate angles to distances: one pitch angle is 1 cycle, or 2pi
+
+HFX = circshift(HF, [0, -qq-1]) .* CB; HFY = circshift(HF, [-qq-1, 0]) .* CB; % Shift the data lobe to the centre and remove the rest
+hfx = ifft2 (ifftshift (HFX)); hfy = ifft2 (ifftshift (HFY)); % transform  back side lobes into image domain
+ax = cl * unwrapc (angle (hfx)); ay = cl * unwrapc (angle (hfy)); % unwrap phase from centre [radians]
+cc = bwconncomp(m); nobjcts = cc.NumObjects; % is aperture segmented or not
+if nobjcts > 1 % Segmented aperture, iteratively fill in the data
+    dx = hfx .* cr; dy = hfy .* cr;
+    sx = sum (dx (:)) / sm; sy = sum (dy (:)) / sm; SX = sx * Nx * Ny; SY = sy * Nx * Ny;
+    bx = sx .* n + dx .* m; % fill angles with average data, plug in real data within mask
+    by = sy .* n + dy .* m; % fill angles with average data, plug in real data within mask
+    stps = 40; tx = zeros (1, stps); ty = tx; % number of max iterations
+    for k = 1:stps
+        t = bx;
+        BX = CO .* fft2 (bx); BX (1) = SX; % keep phase sum constant
+        bx = ifft2(BX) .* n + dx .* m; % use a low pass filter to fill in gaps in mask in x
+        tx (k) = mean (mean (abs (t - bx))); if abs (tx (k)) < 1e-6, break, end % converged
+    end
+    for k = 1:stps
+        t = by;
+        BY = CO .* fft2 (by); BY (1) = SY; % keep phase sum constant
+        by = ifft2(BY) .* n + dy .* m; % use a low pass filter to fill in gaps in mask in y11.53/2.4
+        ty (k) = mean (mean (abs (t - by))); if abs (ty (k)) < 1e-6, break, end % converged
+    end
+    figure (20); set (gcf, 'pos', [1387 42 531 436]); plot (tx), hold on, plot (ty); title ('slopes'' convergence'); grid; drawnow % plot average convergence
+    ax = cl * unwrapc (angle (bx)); ay = cl * unwrapc (angle (by)); % unwrap phase from centre [radians]
+end
+bx = (ax - sum (sum (ax.*m))/sm) .* m; by = (ay - sum (sum (ay.*m))/sm) .* m; % remove average value outside segments
+vx = ax .* m + sum (sum (ax.*m))/sm .* n; vy = ay .* m + sum (sum (ay.*m))/sm .*n; % better display background
+phasef = fft_s2p (bx, by); % Obtaining the phase from the slopes by integration
+
+
+%% 5.3 Analyzing the aberrations
+
+aberrations= {'Piston', 'Tiltx', 'Tilty', 'defocus', 'astigma45', 'AstigmX', 'comaX', 'comaY', 'spherical', 'trifoilX', 'trifoilY', '5thSpherical'};
+aberrations2= {'astigmaX', 'AstigmY', 'comaX', 'comaY', 'spherical'};
+[DCf, Zernikef] = ZernikeCalc([0 0; 1 1; 1 -1; 2 0; 2 2; 2 -2; 3 1; 3 -1;  4 0 ; 3 -3; 3 3; 4 -2;]', phasef, cr, 'standard') ;
+%[DCf2, Zernikef] = ZernikeCalc([1;2;3;4;5;6;7;8;9;10;11;12]', phasef, m, 'ellipse', 0.78) ;
+%[DCf2, Zernikef2] = ZernikeCalc([4;5;6;7;8;]', phasef, m, 'annulus', 0.05) ;
+% DCf is a 1:12 matrix where each dimension represent individual aberrations
+%phzf = phasef-(DCf(:,:,4)); % remove Piston, Tilts and  term from the wave front
+phzf = (phasef-DCf(:,:,1)-DCf(:,:,2)-DCf(:,:,3)-DCf(:,:,4)).*cr; % remove Piston, Tilts and  term from the wave front
+X = categorical(aberrations); X = reordercats(X, aberrations); % for  display purposes
+
+figure   (22); set (gcf, 'pos', [872 10 1046 986])
+subplot (331); imagesc(ax.*cr); axis image; colorbar; title ('horizontal unwrapc angle, rad');
+subplot (334); imagesc(ay.*cr); axis image; colorbar; title ('vertical unwrapc angle, rad');
+subplot (332); imagesc(vx); axis image; colorbar; title ('horizontal unwrapc angle, rad');
+subplot (335); imagesc(vy); axis image; colorbar; title ('vertical unwrapc angle, rad');
+subplot (333); imagesc(hfc.*m); axis image; colorbar; title ('Intensity');
+subplot (336); imagesc(phzf.*m);   axis image; colorbar; title ('full wave front - Zer1235[mm]')
+subplot (3,3, [7,8.9]); bar(X, Zernikef); title ('aberrations fd');  grid
+
+
+
+%% 6.0 Propagation (Not used in  "Wavefront sensing for high focusing extreme ultraviolet optics")
+
+% Propagation
+lam_vector = 13.5; % 0.006:0.006:0.030; 
+lm = length (lam_vector); % wave lengths, in microns
+cp = 42; shrp = zeros (1, cp); % number of cell steps, array
+cell_length = -20000000 * um; % -20 cm
+mic2pix = cp/cell_length;
+pix2mic = 1/mic2pix; % microns per step size
+ll = Nx * mic2pix; % ll is the width of the space in microns?
+kx1 = linspace (0, N21, Nx/2); kx2 = linspace (-Nx/2, -1, Nx/2); % k space
+kx = (2 * pi / ll) * [kx1 kx2];
+[kx, ky] = meshgrid (kx, kx);
+k2 = kx.^2 + ky.^2; % in Fourier space
+A  = sqrt (hfc); % mag of incoming field
+ri = 1; % refractive index
+z1 = 0; z2 = cp; % start, end range
+zd = 5; nd = (cp-1) / zd + 2; % display distances
+dz = mic2pix * wl;
+
+save SO.mat
+
+for lam_index = 1:lm
+    lam = wl; %lam = lam_vector(lam_index);
+    lams = num2str (lam);
+    k0 = 2 * pi / lam;
+    field0 = A .* exp (1i * phasef * k0); % creating an initial field. Notice conversion from microns to wave length
+    intensity = abs(field0).^2 ;
+    d_factor = ri * k0 + sqrt (max (0, ri^2 * k0 * 2 - k2));
+    D_operator = exp (1i * dz * k2 ./ d_factor);
+    for zpixel = z1:z2
+        zz = zpixel - z1 + 1; zx = zz/zd; zams = num2str (zpixel*pix2mic, 5);
+        field = ifft2 (fft2 (field0) .* exp (1i * zz * dz * k2 ./ d_factor));
+        intn = (abs(field)).^2; shrp(zz) = var(intn(:) / sum(intn(:)));
+        %if round (zx) == zx
+            %figure (34)
+            %subplot (1,nd,zx+1); imagesc (intn); axis image; title([num2str(zz) ' steps']); axis off; colorbar h; colormap ("turbo")
+            %drawnow;
+        %end % display
+    end % depth
+end % wavelength
+figure (28); plot (z1:z2, shrp); grid; title ('images sharpness vs distance')
+
+
+
