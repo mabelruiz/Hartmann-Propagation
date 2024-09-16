@@ -1,0 +1,12 @@
+1. Download all the matlab files to the same folder. 
+2. Run HrtProp_main.mat
+3. Follow the instructions
+4. In order to analyze the defocus, the code ask you for the reference file. It is only used to determine the different magnification between the measured pattern and the ideal one. 
+
+
+To use the Propagation developed in python: 
+1. Go to the GitHub second brunch
+2. Install the modified Light_pipes
+3. Open Propagation.oy and change the location of your file to be analyzed
+4. Change the defocus term. 
+5. Run Propagation.py
