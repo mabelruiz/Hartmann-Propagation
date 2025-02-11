@@ -2,7 +2,7 @@ function [output1 output2] = ZernikeCalc( ZernikeList, Zdata, mask, ...
                                           ZernikeDef, ShapeParameter, ...
                                           unitCircle, MMESorC)
 %ZERNIKECALC Uses 'mask' region to fit circular (or other shape) Zernikes to surface data.
-%
+% Robert Gray (2025). ZernikeCalc (https://www.mathworks.com/matlabcentral/fileexchange/33330-zernikecalc), MATLAB Central File Exchange. Recuperado 11 febrero, 2025. 
 % VERSION:  2013-02-07   (YYYY-MM-DD)
 %
 % Fits circular, hexagonal, rectangular, square, elliptical, or annulus
