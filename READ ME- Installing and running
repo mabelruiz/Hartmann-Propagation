@@ -1,7 +1,9 @@
 1. Download all the matlab files to the same folder. 
-2. Run HrtProp_main.mat
+2. Run HrtProp_20250210.m (HrtProp and Hrt2023# are older versions)
 3. Follow the instructions
-4. In order to analyze the defocus, the code ask you for the reference file. It is only used to determine the different magnification between the measured pattern and the ideal one. 
+  3.1 Select a txt or SPE file from your wavefront camer
+  3.2 Add the reference file to your path
+  3.3 Note the value Hrt_disp. This is the defocus term you must introduce in Propagation.py
 
 
 To use the Propagation developed in python: 
